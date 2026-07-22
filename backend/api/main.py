@@ -255,10 +255,6 @@ async def graph_stats():
     from backend.graph.writer import get_driver
     try:
         driver = await get_driver()
-    except Exception as e:
-        return {"nodes": [], "total_edges": 0, "status": "Graph database disconnected"}
-
-    try:
         async with driver.session() as session:
             result = await session.run("""
                 MATCH (n)
@@ -268,9 +264,11 @@ async def graph_stats():
             records = await result.data()
             edge_result = await session.run("MATCH ()-[r]->() RETURN count(r) as total_edges")
             edge_data = await edge_result.data()
+        await driver.close()
         return {
             "nodes": records,
             "total_edges": edge_data[0]["total_edges"] if edge_data else 0,
         }
-    finally:
-        await driver.close()
+    except Exception as e:
+        print(f"[GraphStats] Neo4j unavailable: {e}")
+        return {"nodes": [], "total_edges": 0, "status": "Graph database disconnected"}

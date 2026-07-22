@@ -62,17 +62,12 @@ async def graph_search(
     # Execute against Neo4j
     try:
         driver = await get_driver()
-    except Exception as e:
-        print(f"[GraphSearch] Neo4j connection failed (skipping graph): {e}")
-        return []
-    try:
         results = await _run_cypher(driver, cypher)
+        await driver.close()
         return results
     except Exception as e:
-        print(f"[GraphSearch] Cypher execution failed: {e}\nQuery: {cypher}")
+        print(f"[GraphSearch] Neo4j unavailable or Cypher failed: {e}")
         return []
-    finally:
-        await driver.close()
 
 
 async def _generate_cypher(query: str, query_type: str, hop_limit: int) -> str:
