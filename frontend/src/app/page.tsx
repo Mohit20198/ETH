@@ -6,15 +6,9 @@ import { Database } from "lucide-react";
 
 // Server Component — fetches initial stats, then counter polls live on client
 export default async function Home() {
-  let stats = { nodes: [] as { type: string; count: number }[], total_edges: 0 };
-  let isBackendConnected = true;
-  
-  try {
-    stats = await getGraphStats();
-  } catch (error) {
-    console.error("Backend not reachable or graph is empty:", error);
-    isBackendConnected = false;
-  }
+  const statsData = await getGraphStats();
+  const stats = statsData ?? { nodes: [] as { type: string; count: number }[], total_edges: 0 };
+  const isBackendConnected = statsData !== null;
 
   const totalNodes = stats.nodes?.reduce((acc, curr) => acc + curr.count, 0) || 0;
 
