@@ -14,6 +14,7 @@ export function GraphStatsCounter({ initialNodes = 0, initialEdges = 0 }) {
     const poll = async () => {
       try {
         const data = await getGraphStats();
+        if (!data) return; // backend unreachable, keep current counts
         const totalNodes = data.nodes?.reduce((a: number, c: { count: number }) => a + c.count, 0) || 0;
         if (totalNodes !== nodes || data.total_edges !== edges) {
           setPrevNodes(nodes);

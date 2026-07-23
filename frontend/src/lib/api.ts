@@ -98,10 +98,14 @@ export async function ingestDocument(
 
 // ── Graph Stats ────────────────────────────────────────────────────────────
 
-export async function getGraphStats(): Promise<GraphStats> {
-  const res = await fetch(`${API_URL}/graph/stats`);
-  if (!res.ok) throw new Error(`Stats failed: ${res.statusText}`);
-  return res.json();
+export async function getGraphStats(): Promise<GraphStats | null> {
+  try {
+    const res = await fetch(`${API_URL}/graph/stats`);
+    if (!res.ok) throw new Error(`Stats failed: ${res.statusText}`);
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 // ── Eval ───────────────────────────────────────────────────────────────────

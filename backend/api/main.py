@@ -253,6 +253,7 @@ async def trigger_eval():
 async def graph_stats():
     """Return basic stats about the knowledge graph."""
     from backend.graph.writer import get_driver
+    driver = None
     try:
         driver = await get_driver()
         async with driver.session() as session:
@@ -264,7 +265,6 @@ async def graph_stats():
             records = await result.data()
             edge_result = await session.run("MATCH ()-[r]->() RETURN count(r) as total_edges")
             edge_data = await edge_result.data()
-        await driver.close()
         return {
             "nodes": records,
             "total_edges": edge_data[0]["total_edges"] if edge_data else 0,
@@ -272,3 +272,6 @@ async def graph_stats():
     except Exception as e:
         print(f"[GraphStats] Neo4j unavailable: {e}")
         return {"nodes": [], "total_edges": 0, "status": "Graph database disconnected"}
+    finally:
+        if driver:
+            await driver.close()
