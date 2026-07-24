@@ -5,9 +5,9 @@ import { queryKnowledgeBase, QueryResponse } from "@/lib/api";
 import { GraphPath } from "./GraphPath";
 import { Citations } from "./Citations";
 import {
-  Send, Loader2, User, Bot, AlertCircle,
+  Send, Loader2, User, Bot, AlertCircle, AlertTriangle,
   GitBranch, Layers, FileSearch, Cpu,
-  CheckCircle2, Circle, Zap, Database, Network
+  CheckCircle2, Circle, Zap, Database, Network, ShieldAlert
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -98,42 +98,81 @@ function RetrievalBadge({ path }: { path: "vector" | "graph" | "hybrid" }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Section 3: Escalation banner — prominent, must-see, above the answer
+// ─────────────────────────────────────────────────────────────────────────────
+function EscalationBanner({ notice }: { notice: string }) {
+  return (
+    <div
+      id="escalation-banner"
+      className="flex items-start gap-3 px-4 py-3 rounded-xl border border-orange-500/40 bg-orange-500/10 text-orange-300 mb-3"
+    >
+      <ShieldAlert size={18} className="flex-shrink-0 mt-0.5 text-orange-400" />
+      <p className="text-sm font-medium leading-snug">{notice}</p>
+    </div>
+  );
+}
+
 interface AnswerBubbleProps {
   response: QueryResponse;
 }
 
 function AnswerBubble({ response }: AnswerBubbleProps) {
   const isSmallTalk = response.query_type === "small_talk";
+  const hasEscalation = !!response.escalation_notice;
+  const hasGroundednessWarning =
+    Array.isArray(response.groundedness_warning) &&
+    response.groundedness_warning.length > 0;
 
   return (
-    <div className="px-5 py-4 rounded-2xl bg-white/10 text-zinc-100 rounded-tl-sm border border-white/5 max-w-2xl">
-      {/* Primary answer — larger weight */}
-      <p className="text-[15px] leading-relaxed font-medium text-white">
-        {response.answer}
-      </p>
+    <div className="flex flex-col gap-0 max-w-2xl">
+      {/* Section 3: Escalation banner — rendered ABOVE the answer bubble */}
+      {!isSmallTalk && hasEscalation && (
+        <EscalationBanner notice={response.escalation_notice!} />
+      )}
 
-      {/* Supporting detail — only if present and not small talk */}
-      {!isSmallTalk && response.supporting_detail && (
-        <p className="mt-3 text-sm leading-relaxed text-zinc-400 border-t border-white/5 pt-3">
-          {response.supporting_detail}
+      <div className="px-5 py-4 rounded-2xl bg-white/10 text-zinc-100 rounded-tl-sm border border-white/5">
+        {/* Primary answer */}
+        <p className="text-[15px] leading-relaxed font-medium text-white">
+          {response.answer}
         </p>
-      )}
 
-      {/* Citation note footnote */}
-      {!isSmallTalk && response.citation_note && (
-        <div className="mt-3 flex items-start gap-2 text-xs text-zinc-500 border-t border-white/5 pt-3">
-          <FileSearch size={13} className="flex-shrink-0 mt-0.5 text-zinc-400" />
-          <span className="italic">{response.citation_note}</span>
-        </div>
-      )}
+        {/* Supporting detail */}
+        {!isSmallTalk && response.supporting_detail && (
+          <p className="mt-3 text-sm leading-relaxed text-zinc-400 border-t border-white/5 pt-3">
+            {response.supporting_detail}
+          </p>
+        )}
 
-      {/* Badges row — always bottom-right */}
-      {!isSmallTalk && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3">
-          <RetrievalBadge path={response.retrieval_path ?? "vector"} />
-          <ConfidenceBadge label={response.confidence_label ?? "Low"} />
-        </div>
-      )}
+        {/* Section 1: Groundedness inline notice — below supporting detail */}
+        {!isSmallTalk && hasGroundednessWarning && (
+          <div
+            id="groundedness-notice"
+            className="mt-3 flex items-start gap-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/8 text-amber-400"
+          >
+            <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+            <span className="text-xs leading-relaxed">
+              Some details in this answer could not be fully verified against source documents.
+            </span>
+          </div>
+        )}
+
+        {/* Citation note footnote */}
+        {!isSmallTalk && response.citation_note && (
+          <div className="mt-3 flex items-start gap-2 text-xs text-zinc-500 border-t border-white/5 pt-3">
+            <FileSearch size={13} className="flex-shrink-0 mt-0.5 text-zinc-400" />
+            <span className="italic">{response.citation_note}</span>
+          </div>
+        )}
+
+        {/* Badges row */}
+        {!isSmallTalk && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3">
+            <RetrievalBadge path={response.retrieval_path ?? "vector"} />
+            <ConfidenceBadge label={response.confidence_label ?? "Low"} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

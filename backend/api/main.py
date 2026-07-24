@@ -67,6 +67,9 @@ class QueryResponse(BaseModel):
     agent_used: list[str]
     retrieval_strategy: str
     latency_ms: int
+    # Guardrails fields
+    groundedness_warning: list[str] = []
+    escalation_notice: str = ""
 
 
 class IngestResponse(BaseModel):
@@ -119,6 +122,8 @@ async def query(request: QueryRequest):
             agent_used=response.agent_used,
             retrieval_strategy=response.retrieval_strategy,
             latency_ms=response.latency_ms,
+            groundedness_warning=getattr(response, 'groundedness_warning', []),
+            escalation_notice=getattr(response, 'escalation_notice', ''),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

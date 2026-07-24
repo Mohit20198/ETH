@@ -34,6 +34,11 @@ from backend.agents.lessons_learned import LessonsLearnedAgent
 from backend.config import settings
 from openai import AsyncOpenAI
 
+# Guardrails imports
+from backend.guardrails.groundedness import verify_groundedness, apply_groundedness_to_confidence
+from backend.guardrails.severity import is_high_stakes, get_escalation_notice
+from backend.guardrails.audit_log import log_high_stakes_query
+
 _oai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +153,10 @@ class SupervisorState(TypedDict):
     graph_path: list[dict]
     agents_used: list[str]
     start_time: float
+    # Guardrails state (Sections 1, 3)
+    is_high_stakes: bool
+    groundedness_warning: list[str]
+    escalation_notice: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +165,10 @@ class SupervisorState(TypedDict):
 
 async def classify_node(state: SupervisorState) -> SupervisorState:
     result = await classify_query(state["question"])
-    
+
+    # Section 3: severity flag (keyword check, no LLM call)
+    high_stakes = is_high_stakes(state["question"])
+
     if result["query_type"] == "off-topic":
         return {
             **state,
@@ -166,12 +178,18 @@ async def classify_node(state: SupervisorState) -> SupervisorState:
             "confidence_label": "High",
             "confidence": 1.0,
             "retrieval_strategy": "none",
+            "is_high_stakes": high_stakes,
+            "groundedness_warning": [],
+            "escalation_notice": "",
         }
 
     return {
         **state,
         "query_type": result["query_type"],
         "query_reasoning": result["reasoning"],
+        "is_high_stakes": high_stakes,
+        "groundedness_warning": [],
+        "escalation_notice": "",
     }
 
 
@@ -315,6 +333,64 @@ async def synthesize_node(state: SupervisorState) -> SupervisorState:
     }
 
 
+async def groundedness_check_node(state: SupervisorState) -> SupervisorState:
+    """
+    Section 1: Independent groundedness verification after synthesis.
+    Section 3: Severity escalation check (uses finalized confidence_label).
+
+    Short-circuits for small_talk and off-topic (no retrieval context).
+    """
+    query_type = state.get("query_type", "")
+    final_answer = state.get("final_answer", "")
+    reranked_context = state.get("reranked_context", [])
+    confidence = state.get("confidence", 0.0)
+    confidence_label = state.get("confidence_label", "Low")
+    question = state["question"]
+
+    # Extract raw text from context for groundedness check
+    context_texts = [item.get("text", "") for item in reranked_context if item.get("text")]
+
+    # Section 1: Groundedness verification
+    groundedness = await verify_groundedness(
+        answer=final_answer,
+        context_chunks=context_texts,
+        query_type=query_type,
+    )
+
+    # Adjust confidence based on groundedness result
+    new_confidence, new_label, warning_list = apply_groundedness_to_confidence(
+        groundedness=groundedness,
+        current_confidence=confidence,
+        current_label=confidence_label,
+    )
+
+    # Section 3: Severity escalation (uses finalized label after groundedness cap)
+    high_stakes = state.get("is_high_stakes", False)
+    escalation_notice = get_escalation_notice(
+        query=question,
+        confidence_label=new_label,
+        high_stakes=high_stakes,
+    )
+
+    # Audit log — every high-stakes query regardless of whether escalation fired
+    if high_stakes:
+        log_high_stakes_query(
+            query=question,
+            confidence=new_confidence,
+            confidence_label=new_label,
+            escalated=bool(escalation_notice),
+            escalation_notice=escalation_notice,
+        )
+
+    return {
+        **state,
+        "confidence": new_confidence,
+        "confidence_label": new_label,
+        "groundedness_warning": warning_list,
+        "escalation_notice": escalation_notice,
+    }
+
+
 
 
 
@@ -372,9 +448,10 @@ def build_supervisor() -> StateGraph:
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("dispatch", dispatch_specialists_node)
     graph.add_node("synthesize", synthesize_node)
+    graph.add_node("guardrails", groundedness_check_node)  # Section 1 + 3
 
     graph.set_entry_point("classify")
-    
+
     def route_after_classify(state: SupervisorState):
         if state["query_type"] == "off-topic":
             return END
@@ -383,7 +460,8 @@ def build_supervisor() -> StateGraph:
     graph.add_conditional_edges("classify", route_after_classify)
     graph.add_edge("retrieve", "dispatch")
     graph.add_edge("dispatch", "synthesize")
-    graph.add_edge("synthesize", END)
+    graph.add_edge("synthesize", "guardrails")  # guardrails wraps synthesis
+    graph.add_edge("guardrails", END)
 
     return graph.compile()
 
@@ -431,6 +509,10 @@ async def run_query(question: str) -> AgentResponse:
         graph_path=[],
         agents_used=[],
         start_time=start,
+        # Guardrails initial values
+        is_high_stakes=False,
+        groundedness_warning=[],
+        escalation_notice="",
     )
 
     final_state = await supervisor.ainvoke(initial_state)
@@ -445,5 +527,11 @@ async def run_query(question: str) -> AgentResponse:
         agent_used=final_state.get("agents_used", []),
         retrieval_strategy=final_state["retrieval_strategy"],
         latency_ms=latency_ms,
+        supporting_detail=final_state.get("supporting_detail", ""),
+        citation_note=final_state.get("citation_note", ""),
+        confidence_label=final_state.get("confidence_label", "Low"),
+        retrieval_path=final_state.get("retrieval_path", "vector"),
+        groundedness_warning=final_state.get("groundedness_warning", []),
+        escalation_notice=final_state.get("escalation_notice", ""),
     )
 

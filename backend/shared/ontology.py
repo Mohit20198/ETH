@@ -67,11 +67,14 @@ class AgentResponse:
     agent_used: list[str]               # Which specialist agents contributed
     retrieval_strategy: str             # "vector" | "graph+vector" | "graph" | "none"
     latency_ms: int                     # End-to-end response time
-    # New structured response fields (Section 4)
+    # Structured response fields
     supporting_detail: str = ""         # Optional additional context
     citation_note: str = ""             # Short footnote-style citation reference
     confidence_label: str = "Low"       # "High" | "Medium" | "Low"
     retrieval_path: str = "vector"      # "vector" | "graph" | "hybrid"
+    # Guardrails fields (Section 1 + 3)
+    groundedness_warning: list = field(default_factory=list)  # Unsupported claims list
+    escalation_notice: str = ""         # Non-empty = safety-critical + low confidence
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Document Types (for routing ingestion to the right parser)

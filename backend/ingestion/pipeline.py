@@ -35,6 +35,8 @@ from backend.ingestion.parsers.document_parsers import (
     parse_document,
 )
 from backend.shared.ontology import DOC_TYPES
+from backend.guardrails.injection_scanner import scan_chunk
+from backend.guardrails.audit_log import log_injection_attempt, log_injection_flagged
 
 app = typer.Typer()
 console = Console()
@@ -100,25 +102,61 @@ async def ingest_document(
 
     console.print(f"  → {len(chunks)} chunks extracted")
 
-    # 3. Embed and store in ChromaDB
+    # 3. Embed and store in ChromaDB with injection scanning (Section 2)
     collection = get_chroma_collection()
     chunk_ids = []
+    injection_blocked = 0
     for i, chunk in enumerate(chunks):
-        embedding = await embed_text(chunk)
         chunk_id = f"{doc_id}_chunk_{i}"
+
+        # Section 2: Scan for prompt injection before embedding
+        scan_result = await scan_chunk(chunk)
+
+        if scan_result["is_injection"]:
+            # LLM confirmed injection — block this chunk entirely
+            log_injection_attempt(
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                file_name=Path(file_path).name,
+                text_preview=chunk[:200],
+                matched_patterns=scan_result["matched_patterns"],
+                llm_reasoning=scan_result["reasoning"],
+            )
+            console.print(f"  [red]⚠ Chunk {i} BLOCKED — injection attempt detected[/red]")
+            injection_blocked += 1
+            continue  # Skip embedding this chunk
+
+        # Build metadata — flag regex-matched (but LLM-cleared) chunks
+        chunk_metadata = {
+            "doc_id": doc_id,
+            "doc_type": doc_type,
+            "file_name": Path(file_path).name,
+            "chunk_index": i,
+            "total_chunks": len(chunks),
+            "injection_flagged": scan_result["flagged"],
+        }
+
+        if scan_result["flagged"] and not scan_result["is_injection"]:
+            # Regex-flagged but LLM says it's legitimate — tag and ingest
+            log_injection_flagged(
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                file_name=Path(file_path).name,
+                matched_patterns=scan_result["matched_patterns"],
+            )
+            console.print(f"  [yellow]⚠ Chunk {i} flagged (regex) but cleared by LLM — tagged in metadata[/yellow]")
+
+        embedding = await embed_text(chunk)
         collection.upsert(
             ids=[chunk_id],
             embeddings=[embedding],
             documents=[chunk],
-            metadatas=[{
-                "doc_id": doc_id,
-                "doc_type": doc_type,
-                "file_name": Path(file_path).name,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-            }],
+            metadatas=[chunk_metadata],
         )
         chunk_ids.append(chunk_id)
+
+    if injection_blocked:
+        console.print(f"  [red]✗ {injection_blocked} chunk(s) blocked as injection attempts[/red]")
 
     console.print(f"  → {len(chunk_ids)} chunks stored in ChromaDB")
 

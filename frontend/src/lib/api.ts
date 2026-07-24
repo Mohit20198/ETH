@@ -35,6 +35,9 @@ export interface QueryResponse {
   agent_used: string[];
   retrieval_strategy: string;
   latency_ms: number;
+  // Guardrails fields
+  groundedness_warning?: string[];
+  escalation_notice?: string;
 }
 
 export interface IngestResponse {
