@@ -169,13 +169,16 @@ async def ingest_document(
         for item in extracted["edges"]:
             edge = item["edge"]
             prov = item["provenance"]
-            await writer.upsert_edge(
+            committed = await writer.upsert_edge(
                 edge["from_id"], edge["from_type"],
                 edge["edge_type"],
                 edge["to_id"], edge["to_type"],
                 prov,
             )
-            edges_written += 1
+            if committed:
+                edges_written += 1
+            else:
+                console.print(f"  [yellow]⚠ Edge skipped or failed: {edge['from_id']} -[{edge['edge_type']}]-> {edge['to_id']}[/yellow]")
 
         await driver.close()
 

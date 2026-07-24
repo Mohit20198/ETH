@@ -3,7 +3,7 @@ import requests
 import tempfile
 import time
 
-API_URL = "http://localhost:8000"
+API_URL = "https://industrialiq-api.onrender.com"
 
 DOCUMENTS = [
     {
@@ -133,7 +133,7 @@ def seed_data():
             files = {"file": (doc["filename"], f, "text/plain")}
             data = {"doc_type": "generic"}
             try:
-                res = requests.post(f"{API_URL}/ingest", files=files, data=data)
+                res = requests.post(f"{API_URL}/ingest", files=files, data=data, timeout=120)
                 if res.status_code == 200:
                     resp_data = res.json()
                     if resp_data.get("status") == "skipped":
@@ -141,12 +141,13 @@ def seed_data():
                     else:
                         print(f"  -> Success! Chunks: {resp_data.get('chunks')}, Nodes: {resp_data.get('nodes')}")
                 else:
-                    print(f"  -> Failed: {res.status_code} {res.text}")
+                    print(f"  -> Failed: {res.status_code} {res.text[:200]}")
             except Exception as e:
                 print(f"  -> Error connecting to API: {e}")
         
-        # Brief pause between uploads
-        time.sleep(1)
+        # Longer pause to avoid rate limits
+        print("  Waiting 10s before next upload...")
+        time.sleep(10)
 
     print("Finished seeding data.")
 

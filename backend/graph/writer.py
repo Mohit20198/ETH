@@ -60,7 +60,7 @@ class GraphWriter:
     ) -> str:
         """
         MERGE (upsert) a node. Properties are merged, not replaced.
-        Returns the node_id.
+        Returns the node_id on success, None if skipped or failed.
         """
         if provenance.confidence < CONFIDENCE_THRESHOLDS["write_to_graph"]:
             return None  # Don't write low-confidence facts
@@ -80,8 +80,12 @@ class GraphWriter:
         async with self.driver.session() as session:
             result = await session.run(cypher, id=node_id, props=props)
             record = await result.single()
+            returned_id = record["n.id"] if record else None
+
+        # Audit log in its own session to avoid nested-session pool exhaustion
+        if returned_id:
             await self._write_audit_log("upsert_node", node_type, node_id, provenance)
-            return record["n.id"] if record else None
+        return returned_id
 
     async def upsert_edge(
         self,
@@ -92,12 +96,15 @@ class GraphWriter:
         to_type: str,
         provenance: Provenance,
         edge_properties: dict = None,
-    ):
+    ) -> bool:
         """
         MERGE an edge between two nodes with full provenance payload.
+        Uses MERGE for both endpoint nodes so the edge is never silently dropped
+        even if a node wasn't committed in a prior step.
+        Returns True if the edge was written, False if skipped.
         """
         if provenance.confidence < CONFIDENCE_THRESHOLDS["write_to_graph"]:
-            return
+            return False
 
         edge_props = {
             "source_doc_id": provenance.source_doc_id,
@@ -111,20 +118,30 @@ class GraphWriter:
             **(edge_properties or {}),
         }
 
+        # KEY FIX: use MERGE (not MATCH) on both endpoint nodes so the
+        # relationship is never silently dropped when a node is missing.
+        # MERGE will create the node stub if it doesn't already exist.
         cypher = f"""
-        MATCH (a:{from_type} {{id: $from_id}})
-        MATCH (b:{to_type} {{id: $to_id}})
+        MERGE (a:{from_type} {{id: $from_id}})
+        MERGE (b:{to_type} {{id: $to_id}})
         MERGE (a)-[r:{edge_type}]->(b)
         SET r += $edge_props
+        RETURN type(r) AS rel_type
         """
         async with self.driver.session() as session:
-            await session.run(
+            result = await session.run(
                 cypher,
                 from_id=from_id,
                 to_id=to_id,
                 edge_props=edge_props,
             )
+            record = await result.single()
+
+        # Audit log in its own session to avoid nested-session pool exhaustion
+        written = record is not None
+        if written:
             await self._write_audit_log("upsert_edge", edge_type, f"{from_id}->{to_id}", provenance)
+        return written
 
     async def _write_audit_log(
         self,
