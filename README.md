@@ -100,7 +100,5 @@ LangGraph Supervisor
     └─ 4. Synthesis Engine ── Final answer + citations + confidence
 ```
 
-## 👥 Team
-- **Vaibhav** — Data & Storage (`backend/graph/`, `backend/ingestion/`)
-- **Mohit** — Intelligence & Application (`backend/retrieval/`, `backend/agents/supervisor.py`)
-- **Kavyansh** — UI + Compliance (`backend/agents/compliance.py`, `frontend/`)
+
+
